@@ -1,0 +1,80 @@
+import time
+import sqlite3
+import requests
+from bs4 import BeautifulSoup
+
+# 1. データベースの作成と初期設定
+conn = sqlite3.connect("google_repos.db")
+cursor = conn.cursor()
+
+# テーブルの作成（既に存在する場合は削除して新規作成）
+cursor.execute("DROP TABLE IF EXISTS repositories")
+cursor.execute("""
+CREATE TABLE repositories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    language TEXT,
+    stars INTEGER
+)
+""")
+conn.commit()
+
+# 2. スクレイピング（GitHub APIを使わずHTMLを取得）
+url = "https://github.com/orgs/google/repositories"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+response = requests.get(url, headers=headers)
+
+if response.status_code == 200:
+    soup = BeautifulSoup(response.text, "html.parser")
+    
+    # 各リポジトリの要素を取得（GitHubのDOM構造に対応）
+    repo_list = soup.select("li.Box-row")
+    
+    for repo in repo_list:
+        # リポジトリ名の取得
+        name_tag = repo.select_one("a[aria-describedby]") or repo.select_one("h3 a")
+        repo_name = name_tag.text.strip() if name_tag else "N/A"
+        
+        # 主要言語の取得
+        lang_tag = repo.select_one("[itemprop='programmingLanguage']")
+        language = lang_tag.text.strip() if lang_tag else "Unknown"
+        
+        # スター数の取得
+        star_tag = repo.select_one("a[href*='/stargazers']")
+        if star_tag:
+            star_text = star_tag.text.strip().replace(",", "")
+            # 「1.2k」などの表記がある場合の変換処理
+            if "k" in star_text:
+                stars = int(float(star_text.replace("k", "")) * 1000)
+            else:
+                stars = int(star_text)
+        else:
+            stars = 0
+            
+        # DBにデータを挿入
+        cursor.execute(
+            "INSERT INTO repositories (name, language, stars) VALUES (?, ?, ?)",
+            (repo_name, language, stars)
+        )
+        
+        # サーバーへの負荷軽減のため、1秒待機
+        time.sleep(1)
+        
+    conn.commit()
+    print("スクレイピングとDBへの保存が完了しました。\n")
+else:
+    print(f"ページの取得に失敗しました。ステータスコード: {response.status_code}")
+
+# 3. 保存したデータをSELECT文で表示する
+cursor.execute("SELECT id, name, language, stars FROM repositories")
+rows = cursor.fetchall()
+
+print("--- 保存されたリポジトリ情報 ---")
+for row in rows:
+    print(f"ID: {row[0]} | リポジトリ名: {row[1]} | 主要言語: {row[2]} | スター数: {row[3]}")
+
+# 接続のクローズ
+conn.close()
