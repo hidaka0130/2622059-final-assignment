@@ -91,5 +91,5 @@ def print_repos():
 
 if __name__ == "__main__":
     create_table()
-    fetch_repos(2)
-    print_repos()
+fetch_repos(2)
+print_repos()
